@@ -1,12 +1,11 @@
 // on-off, beim starten status nicht ändern
-// Config URL: always show 4 positions. Pre-fill with found lamps, allow changes of IP and position 
-// Chose from all lamps found, assign Positions 1-4, add custom lamp IP
-// positionen merken
 // 2d-Effekte raus
 // nur aktivierte fx + pals holen....
-// test config_restart
+// Invalide/leere wledjson files
+// help info im Nextion statt checkbox
 
-#define DEBUG 1
+
+#define DEBUG 0     // 0 very basic Serial debug messages, 1 = more than just basic, 2 = full
 
 #include <i2cEncoderMiniLib.h>  //for 2x rotary encoders via I2C 
 
@@ -35,7 +34,7 @@ unsigned long oldTime[2] = {0};
 float linearSpeed_old;
 
 
-// 2x ADS1115 I2C Hardware extension board for multiple potentiomete readings
+// 2x ADS1115 I2C Hardware extension board for multiple potentiometer readings
 #include<ADS1115_WE.h> 
 #include<Wire.h>
 #define I2C_ADDRESS1 0x48
@@ -59,6 +58,7 @@ ADS1115_WE adc2 = ADS1115_WE(I2C_ADDRESS2);
 #include <StreamUtils.h>
 #include "wled_mixer_spiffs.h"
 #include "wled_mixer_json2arrays.h"
+#include "wled_mixer_uploads.h"
 
 // Nextion touch display
 #include "EasyNextionLibrary.h"
@@ -77,7 +77,7 @@ uint32_t fx_intensity = 128;
 bool fx_go = 0;
 bool pal_go = 0;
 bool c0 = 0;
-bool config_restart = 0;
+
 
 unsigned long lastTime = 0;
 unsigned long timerDelay = 100;
@@ -88,69 +88,7 @@ int lamp_pos[4] = {-1};  // position of lamp_id[] on the mixer hardware, sliders
 int voltages[9] = {0};   // for pot value readings. 2x4 from 2xADS1115 over I2C, 1* on GPIO 14
 int voltages_old[9] = {0};
 
-WiFiUDP udp;
-WebServer server(80);
-
-String INDEX_HTML_fields = "";
-
-const char INDEX_HTML_start[] =
-"<!DOCTYPE HTML><html>"
-"<head>"
-"<meta name = \"viewport\" content = \"width = device-width, initial-scale = 1.0, maximum-scale = 1.0, user-scalable=0\">"
-"<center><h1>WLED-Mixer Configuration</h1></center>"
-"<style>\"body { background-color: #808080; font-family: Arial, Helvetica, Sans-Serif; Color: #000000; }\"</style>"
-"<script>"
-"function chk_IDsum() {"
-" var arr = document.getElementsByName('ID');"
-" var total = 0;"
-" for(var i = 0; i < arr.length; i++){ total += parseInt(arr[i].value); }"
-"   if (total != 10) {"
-"     alert(\"Please enter all positions from 1 to 4, each only one time.\");"
-"  }"
-"}"
-"</script>"
-"</head>"
-"<body>"
-"<FORM action=\"/\" method=\"post\" onsubmit=\"return chk_IDsum()\">"
-"<center>"
-"<h2>Enter Mixer Position of Lamp here:</h2><br>";
-
-const char INDEX_HTML_end[] =
-"<br>"
-"<input type='submit' name='Submit'>"
-"</center>"
-"</FORM>"
-"</body>"
-"</html>";
-
-String generate_input_fields(){     // Fills in the INDEX_HTML_fields form data according to found lamps
-  char tmp_str[150] = "";
-  char return_str[900] = ""; 
-  
-  for (int i = 0; i < lamp_count; i++) {
-    sprintf(tmp_str, "%s%d%s%s%s", "<input type='text' id='ID' name =\"ID", i+1, "\" size=\"1\" pattern=\"[0-9]{1}\" required>", info_name_char[i] ,"<br>");
-    sprintf(return_str, "%s%s", return_str, tmp_str);
-    tmp_str[0] = 0;
-  }
-  Serial.print("return_str: "); Serial.println(return_str);
-  return (String)return_str;
-}
-
-
-void handleRoot() {
-  String html = INDEX_HTML_start + INDEX_HTML_fields + INDEX_HTML_end;
-  server.send(200, "text/html", html);
-  lamp_pos[0] = server.arg("ID1").toInt();
-  lamp_pos[1] = server.arg("ID2").toInt();
-  lamp_pos[2] = server.arg("ID3").toInt();
-  lamp_pos[3] = server.arg("ID4").toInt();
-  Serial.printf("Lamp_pos for IDs 1-4: %d %d %d %d \r\n", lamp_pos[0], lamp_pos[1], lamp_pos[2], lamp_pos[3]);
-}
-
-void handleNotFound() {
-  server.send(200, "text/plain", "page does not exist");
-}
-
+//WiFiUDP udp;  //moved to send_udp as local object
 
 //Pre-Declarations
 void startOTA();
@@ -160,8 +98,6 @@ void adc_init();
 void init_encoder(int enc_ID);
 float readChannel_adc1(ADS1115_MUX channel);
 float readChannel_adc2(ADS1115_MUX channel);
-void browseService(const char * service, const char * proto);
-
 
 
 ////////////////////////////////////////////////////////////////
@@ -200,34 +136,35 @@ void setup() {
   MDNS.begin("WLED_MIXER");
   
   bool files = readFile(SPIFFS, "/wledjson0", 0);
-  //SPIFFS.format();
-  //files = 0;      // un-comment to force complete re-scan
   if (!files) {
-    if (DEBUG) Serial.println("No files");
-    browseService("wled", "tcp");
+    Serial.println("No wledjson files found. Please upload valid json file via http://" + WiFi.localIP().toString() );
   } else {
     read_json_files();
   }
 
-  INDEX_HTML_fields = generate_input_fields();
   // webserver configs
   server.on("/", handleRoot);
   server.onNotFound(handleNotFound);
+  server.on("/update", HTTP_POST, [](){ server.send(200, "text/plain", ""); }, handleUpdate);
+  
   server.begin();
   Serial.println("HTTP server started");
 
   //delay(1000);
-  if (DEBUG) {
+  if ((DEBUG == 1) || (DEBUG == 2)) {
     Serial.println("*************setup************");
-     for (int j = 0; j < lamp_count; j++){ 
-      Serial.printf("j: %d ID: %d POS: %d name: %s IP: %s FX: %d FX Name: %s \r\n", j, lamp_id[j], lamp_pos[j], info_name_char[j], info_ip_char[j], state_seg_fx[j], fx_char[j][state_seg_fx[j]]);
-      /*for (int i = 0; i < info_fxcount[j]; i++) { 
-      //  Serial.println(fx_char[j][i]);
+     for (int j = 0; j < lamp_count; j++){  
+      int fxid = search_fxchar_id_array( j, info_fxcount [j], state_seg_fx[j] );
+      Serial.printf("j: %d ID: %d POS: %d name: %s IP: %s FX: %d FX Name: %s \r\n", j, lamp_id[j], lamp_pos[j], info_name_char[j], info_ip_char[j], state_seg_fx[j], fx_char[j][fxid] );
+      if (DEBUG == 2) {
+        for (int i = 0; i < info_fxcount[j]; i++) { 
+          Serial.println(fx_char[j][i]);
+        }
+        Serial.printf( "\r\nlamp_id: %d palettes \r\n", j);
+        for (int i = 0; i < info_palcount[j]; i++) {
+          Serial.println(pal_char[j][i]);
+        }
       }
-      //Serial.printf( "\r\nlamp_id: %d palettes \r\n", j);
-      for (int i = 0; i < info_palcount[j]; i++) {
-      //  Serial.println(pal_char[j][i]);
-      }*/
       Serial.println("********** setup end **************");
      }
   }
@@ -245,14 +182,6 @@ void loop() {
   while (Serial2.available()) {   //reads data from serial2 and sends to serial0 (serial monitor)
     Serial.print(char(Serial2.read()));
   }
-
-  if (config_restart) {   // re-initialize all lamp info was triggered from touch screen
-    config_restart = 0;
-    SPIFFS.format();
-    browseService("wled", "tcp");
-    read_json_files();
-    INDEX_HTML_fields = generate_input_fields();
-  }
   
   // Rotary encoder updates
   if (digitalRead(INTPIN) == LOW) {
@@ -261,9 +190,7 @@ void loop() {
     encoder[1].updateStatus();
   }
 
-
   if ((millis() - lastTime) > timerDelay) {
-
     encoder[0].writeStep((int32_t) 1);  //reset rot enc steps to standard after a little timeout
     encoder[1].writeStep((int32_t) 1);
     
@@ -283,16 +210,16 @@ void loop() {
     lastTime = millis();
   }
 
-  static bool master_onoff = 0;
+  static bool master_onoff = 0;     // crossfader (voltages[8]) acts as master switch
   
   for (int j = 0; j < 9; j++) { 
     if ((voltages[j] < voltages_old[j] - JITTER) || (voltages[j] > voltages_old[j] + JITTER)) {  
-      //Serial.printf("pot changed: %d  all values: %d %d %d %d %d %d %d %d %d\r\n", j, voltages[0], voltages[1], voltages[2], voltages[3], voltages[4], voltages[5], voltages[6], voltages[7], voltages[8]);
+      if (DEBUG == 2) Serial.printf("pot changed: %d  all values: %d %d %d %d %d %d %d %d %d\r\n", j, voltages[0], voltages[1], voltages[2], voltages[3], voltages[4], voltages[5], voltages[6], voltages[7], voltages[8]);
       adjust_brightness(j, voltages[j]);       // now we know what value has chaned, let it send out 
 
       if (voltages[8] < 50) {     // crossfader servers as master on/off switch
         if (master_onoff == 1) {
-          if (DEBUG) Serial.println("Master Power OFF");
+          if ((DEBUG == 1) || (DEBUG == 2)) Serial.println("Master Power OFF");
           master_onoff = 0;
           for ( int i = 0; i < lamp_count; i++ ){
             send_udp (info_ip_char[i], (String)"{\"on\":false,\"PWRon\":false}" );
@@ -302,7 +229,7 @@ void loop() {
       } 
       else if (voltages[8] > 200) {
         if (master_onoff == 0) {
-          if (DEBUG) Serial.println("Master Power ON");
+          if ((DEBUG == 1) || (DEBUG == 2)) Serial.println("Master Power ON");
           master_onoff = 1;
           for ( int i = 0; i < lamp_count; i++ ){
             send_udp (info_ip_char[i], (String)"{\"on\":true,\"PWRon\":true}" );
@@ -319,7 +246,7 @@ void loop() {
 
 
 void read_json_files(){
-    if (DEBUG) Serial.print("files found: ");
+    if ((DEBUG == 1) || (DEBUG == 2)) Serial.print("files found: ");
     lamp_count = listDir(SPIFFS, "/", 0);
     
     for (int j = 0; j < lamp_count; j++){
@@ -329,86 +256,24 @@ void read_json_files(){
       
       char buf[10];
       sprintf(buf, "%s%d", "/wledjson", j);      //generate filename
-      if (DEBUG) Serial.print("call deserialization with: ");  Serial.println(buf);
+      if ((DEBUG == 1) || (DEBUG == 2)) Serial.print("call deserialization with: ");  Serial.println(buf);
       readFile(SPIFFS, buf, 0);
       File file = SPIFFS.open(buf);
       DeserializationError error = deserializeJson(doc, file);
       if (error) Serial.println(F("Failed to read file"));
       file.close();
       
-      if (DEBUG) Serial.println("call json2array");
+      if ((DEBUG == 1) || (DEBUG == 2)) Serial.println("call json2array");
       json2array(j, 1);
     }
 }
 
 
-void browseService(const char * service, const char * proto){
-  
-    Serial.printf("Browsing for service _%s._%s.local. ... ", service, proto);
-    int n = MDNS.queryService(service, proto);
-    if (n == 0) {
-        Serial.println("no services found");
-    } else {
-        Serial.print(n); Serial.println(" service(s) found");
-        lamp_count = n;
-        for (int i = 0; i < lamp_count; ++i) {
-            lamp_id[i] = i;     // in case we have less than 4 lamps, array values will remain -1 as initialized
-            lamp_pos[i] = i;    // position can be changed on web config page later
-            // Print details for each service found
-            String wled_ip = MDNS.IP(i).toString();
-            Serial.print(MDNS.hostname(i)); Serial.print(" "); Serial.println(wled_ip);
-            search_wleds(wled_ip, i);  // call json/info, check for valid "name":"value" pairs in response, assign first 4 found
-        }
-    }
-    Serial.println();
-}
-
-
-void search_wleds(String wled_ip, int lamp_id) {   // Identify WLED lamps by json value query, extract name
-
-  HTTPClient http;
-  String addr = "http://" + wled_ip + "/json";
-  //Serial.println(addr);
-  
-  http.begin(addr);
-  int httpResponseCode = http.GET();
-  if (httpResponseCode == 200) {
-    String httpstr = http.getString();
-    
-    DeserializationError error = deserializeJson(doc, httpstr);
-    if (error) {              // Test if parsing succeeds.
-      Serial.print(F("deserializeJson() failed: "));
-      Serial.println(error.f_str());
-      return;
-    }
-
-    char buf[10];
-    sprintf(buf, "%s%d", "/wledjson", lamp_id);      //generate filename
-    if (DEBUG) Serial.println(buf);
-
-    SPIFFS.remove(buf);       // Delete existing file, otherwise the configuration is appended to the file
-    
-    File file = SPIFFS.open(buf, FILE_WRITE);       // Open file for writing
-    if (!file) {
-      Serial.println(F("Failed to create file"));
-      return;
-    }
-  
-    if (serializeJson(doc, file) == 0) {             // Serialize JSON to file
-      Serial.println(F("Failed to write to file"));
-    }
-    file.close();
-
-    json2array(lamp_id, 1);
-  }
-  http.end();
-}
-
 
 void update_wled_status(char * IP, int lamp_ID) {   // get current status such as fx for display on nextion
   HTTPClient http;
   String addr = "http://" + (String)IP + "/json";
-  if (DEBUG) Serial.println(addr);
+  if ((DEBUG == 1) || (DEBUG == 2)) Serial.println(addr);
   
   http.begin(addr);
   int httpResponseCode = http.GET();
@@ -444,30 +309,32 @@ void adjust_brightness(int pot_ID, int voltage) {    // send changed brightness 
     if (lamp_pos[pot_ID] == -1) return;
     char sendbri[15] = "\0";
     sprintf(sendbri, "%s%d%s","{\"bri\":", voltage, "}");
-    //Serial.printf("\r\n Pot ID: %d  Name: %s  IP: %s  Position: %d  JSON: %s \r\n ", pot_ID, info_name_char[lamp_pos[pot_ID]], info_ip_char[lamp_pos[pot_ID]], lamp_pos[pot_ID], sendbri);
+    if (DEBUG == 2) Serial.printf("\r\n Pot ID: %d  Name: %s  IP: %s  Position: %d  JSON: %s \r\n ", pot_ID, info_name_char[lamp_pos[pot_ID]], info_ip_char[lamp_pos[pot_ID]], lamp_pos[pot_ID], sendbri);
     send_udp(info_ip_char[lamp_pos[pot_ID]], (String)sendbri);
   } 
   else if (pot_ID >= 4 && pot_ID < 8) {   // slider was moved, sliders are for PWRbri
     if (lamp_pos[7 - pot_ID] == -1) return;
     char sendPWRbri[20] = "\0";
     sprintf(sendPWRbri, "%s%d%s", "{\"PWRbri\":", voltage, "}");
-    //Serial.printf("\r\n Pot ID: %d  Name: %s  IP: %s  Position: %d  PWR JSON: %s \r\n ", pot_ID, info_name_char[lamp_pos[7 - pot_ID]], info_ip_char[lamp_pos[7 - pot_ID]], lamp_pos[7 - pot_ID], sendPWRbri);
+    if (DEBUG == 2) Serial.printf("\r\n Pot ID: %d  Name: %s  IP: %s  Position: %d  PWR JSON: %s \r\n ", pot_ID, info_name_char[lamp_pos[7 - pot_ID]], info_ip_char[lamp_pos[7 - pot_ID]], lamp_pos[7 - pot_ID], sendPWRbri);
     send_udp(info_ip_char[lamp_pos[7 - pot_ID]], (String)sendPWRbri);   // 7- because we have 8 wheels+sliders but only 4 positions
   } 
 }
 
 
-void send_udp (char * IP, String ws_payload) {      // e.g. send_udp("{\"on\":false}");
+void send_udp (char * IP, String payload) {      // e.g. send_udp("{\"on\":false}");
+
   if ((WiFi.status() == WL_CONNECTED)) {
-    if (DEBUG) Serial.printf("send_udp: IP %s  payload: %s\r\n", IP, ws_payload.c_str());
+    WiFiUDP udp;
+    if (DEBUG == 2) Serial.printf("send_udp: IP %s  payload: %s\r\n", IP, payload.c_str());
     udp.beginPacket(IP, 21324);
-    udp.printf("%s", ws_payload.c_str());
+    udp.printf("%s", payload.c_str());
     udp.endPacket();
   }
 } 
 
-///////////// ADS1115 
 
+///////////// ADS1115 ADC over I2C converter
 void adc_init() {
   if(!adc1.init()){
     Serial.println("adc1 not connected!");
@@ -560,7 +427,7 @@ void set_rot(int encID, int sign){    // determine speed level, set rot step val
   if (encID == 0) {           // encID = 0 is for palette or color changes
     if (paletteORsolid[selected_lamp]) {     // paletteORsolid: 1 = Solid Color, use rot encoder 0 as color wheel    
       color[selected_lamp] = color[selected_lamp] + (rot_data[0] * sign * 10);
-      if (DEBUG) Serial.println("set_rot color[selected_lamp]: " + (String(color[selected_lamp])) + " rot[0]: " + String(rot_data[0]));
+      if (DEBUG == 2) Serial.println("set_rot color[selected_lamp]: " + (String(color[selected_lamp])) + " rot[0]: " + String(rot_data[0]));
       if (color[selected_lamp] <= 0) color[selected_lamp] = 65500;
       else if (color[selected_lamp] > 65500) color[selected_lamp] = 0;
       HSV2RGB( (float)color[selected_lamp], 100.0, 100.0 );    // converts current color value to RGB and sends it to selected_lamp via udp
@@ -623,62 +490,61 @@ int rotspeed(int i, int encID) {      //i = current pos value of encoder[encID]
 
 void trigger1(){    //RadioButton "r0" Touch Release Event printh 23 02 54 01
   bt0 = myNex.readNumber("bt0.val");
-  if (DEBUG) Serial.println((String)"bt0: " + bt0);
+  if ((DEBUG == 1) || (DEBUG == 2)) Serial.println((String)"bt0: " + bt0);
   update_nextion(lamp_pos[0]);
   selected_lamp = 0;
 }
 
 void trigger2(){    //RadioButton "r1" Touch Release Event printh 23 02 54 02
   bt1 = myNex.readNumber("bt1.val");
-  if (DEBUG) Serial.println((String)"bt1: " + bt1);
+  if ((DEBUG == 1) || (DEBUG == 2)) Serial.println((String)"bt1: " + bt1);
   update_nextion(lamp_pos[1]);
   selected_lamp = 1;
 }
 
 void trigger3(){    //RadioButton "r2" Touch Release Event printh 23 02 54 03
   bt2 = myNex.readNumber("bt2.val");
-  if (DEBUG) Serial.println((String)"bt2: " + bt2);
+  if ((DEBUG == 1) || (DEBUG == 2)) Serial.println((String)"bt2: " + bt2);
   update_nextion(lamp_pos[2]);
   selected_lamp = 2;
 }
 
 void trigger4(){    //RadioButton "r3" Touch Release Event printh 23 02 54 04
   bt3 = myNex.readNumber("bt3.val");
-  if (DEBUG) Serial.println((String)"bt3: " + bt3);
+  if ((DEBUG == 1) || (DEBUG == 2)) Serial.println((String)"bt3: " + bt3);
   update_nextion(lamp_pos[3]);
   selected_lamp = 3;
 }
 
 void trigger5(){    //Button "butPAL" Touch Release Event printh 23 02 54 05
   butPAL = myNex.readNumber("butPAL.val");
-  if (DEBUG) Serial.println((String)"5 butPAL: " + butPAL);
-  //paletteORsolid[selected_lamp] = !paletteORsolid[selected_lamp];
+  if ((DEBUG == 1) || (DEBUG == 2)) Serial.println((String)"5 butPAL: " + butPAL);
   paletteORsolid[selected_lamp] = 0;
   myNex.writeNum("butPAL.val", 1);
   myNex.writeNum("butSC.val", 0);
   // palette value changes are handled in set_rot function
-  // butPAL/butSC button status toggle is implemented in Nextion directly
   // set fx mode to last active effect
   send_udp (info_ip_char[selected_lamp], (String)"{\"seg\":[{\"id\":0, \"fx\":" + (String)state_seg_fx[selected_lamp] + "}]}" );
+  // ?? update_nextion();
 }
 
 void trigger6(){    //Button "butSC" Touch Release Event printh 23 02 54 06
   butSC = myNex.readNumber("butSC.val");
-  if (DEBUG) Serial.println((String)"6 butSC: " + butSC);
+  if ((DEBUG == 1) || (DEBUG == 2)) Serial.println((String)"6 butSC: " + butSC);
   //paletteORsolid[selected_lamp] = !paletteORsolid[selected_lamp];
   paletteORsolid[selected_lamp] = 1;
   myNex.writeNum("butPAL.val", 0);
   myNex.writeNum("butSC.val", 1);
   // Solid Color changes are handled in set_rot function
-  // butPAL/butSC button status toggle is implemented in Nextion directly
   // set solid color mode
-  send_udp (info_ip_char[selected_lamp], (String)"{\"seg\":[{\"id\":0, \"fx\":0}]}" );    
+  send_udp (info_ip_char[selected_lamp], (String)"{\"seg\":[{\"id\":0, \"fx\":0}]}" ); 
+   // ?? update_nextion();   
 }
 
 void trigger7(){    //Button "butOnOff" Touch Release Event printh 23 02 54 07
   String butOnOffstr = "false";
   butOnOff = myNex.readNumber("butOnOff.val");
-  if (DEBUG) Serial.println((String)"7 butOnOff: " + butOnOff);
+  if ((DEBUG == 1) || (DEBUG == 2)) Serial.println((String)"7 butOnOff: " + butOnOff);
   state_on[selected_lamp] = butOnOff;
   state_PWRon[selected_lamp] = butOnOff;
   if (butOnOff == 0) butOnOffstr = "false";     // 0 and 1 don't work in JSON API call
@@ -688,45 +554,43 @@ void trigger7(){    //Button "butOnOff" Touch Release Event printh 23 02 54 07
 
 void trigger8(){    //Slider "fx_speed" Touch Move Event printh 23 02 54 08
   fx_speed = myNex.readNumber("fx_speed.val");
-  if (DEBUG) Serial.print("8 fx_speed: "); Serial.println(fx_speed);
+  if ((DEBUG == 1) || (DEBUG == 2)) Serial.print("8 fx_speed: "); Serial.println(fx_speed);
   state_seg_sx[selected_lamp] = fx_speed;
   send_udp (info_ip_char[selected_lamp], (String)"{\"seg\":[{\"id\":0, \"sx\":" + (String)fx_speed + "}]}" );
 }
 
 void trigger9(){    //Slider "fx_intensity" Touch Move Event printh 23 02 54 09
   fx_intensity = myNex.readNumber("fx_intensity.val");
-  if (DEBUG) Serial.print("9 fx_intensity: "); Serial.println(fx_intensity);
+  if ((DEBUG == 1) || (DEBUG == 2)) Serial.print("9 fx_intensity: "); Serial.println(fx_intensity);
   state_seg_ix[selected_lamp] = fx_speed;
   send_udp (info_ip_char[selected_lamp], (String)"{\"seg\":[{\"id\":0, \"ix\":" + (String)fx_speed + "}]}" );
 }
 
 void trigger10(){    //Button "fx_go" Touch Release Event printh 23 02 54 0A
   fx_go = myNex.readNumber("fx_go.val");
-  if (DEBUG) Serial.println((String)"10 (0A) fx_go: " + fx_go);
+  if ((DEBUG == 1) || (DEBUG == 2)) Serial.println((String)"10 (0A) fx_go: " + fx_go);
   state_seg_fx[selected_lamp] = rot_data[1];
   
   // last 3 digits of fx_char[] name hold the ID of the effect
   int fxlen = strlen(fx_char[selected_lamp][rot_data[1]]);
   String fxID =  (String)fx_char[selected_lamp][rot_data[1]][fxlen-3] + (String)fx_char[selected_lamp][rot_data[1]][fxlen-2] + (String)fx_char[selected_lamp][rot_data[1]][fxlen-1];  
-  if (DEBUG) Serial.println((String)"{\"seg\":[{\"id\":0, \"fx\":" + fxID + "}]}");
   send_udp (info_ip_char[selected_lamp], (String)"{\"seg\":[{\"id\":0, \"fx\":" + fxID + "}]}" );
 }
 
 void trigger11(){    //Button "pal_go" Touch Release Event of the button: printh 23 02 54 0B
   pal_go = myNex.readNumber("pal_go.val");
-  if (DEBUG) Serial.println((String)"11 (0B) pal_go: " + pal_go);
+  if ((DEBUG == 1) || (DEBUG == 2)) Serial.println((String)"11 (0B) pal_go: " + pal_go);
   state_seg_pal[selected_lamp] = rot_data[0];
-  //send_udp (info_ip_char[selected_lamp], (String)"{\"seg\":[{\"id\":0, \"pal\":" + (String)rot_data[0] + "}]}" );
+  
   // last 3 digits of pal_char[] name hold the ID of the effect
   int pallen = strlen(pal_char[selected_lamp][rot_data[0]]);
   String palID =  (String)pal_char[selected_lamp][rot_data[0]][pallen-3] + (String)pal_char[selected_lamp][rot_data[0]][pallen-2] + (String)pal_char[selected_lamp][rot_data[0]][pallen-1];  
   send_udp (info_ip_char[selected_lamp], (String)"{\"seg\":[{\"id\":0, \"pal\":" + palID + "}]}" );
 }
 
-void trigger12(){    //checkbox for config was ticked. printh 23 02 54 0C
+void trigger12(){    //Show help info where to upload json config files
   c0 = myNex.readNumber("c0.val");
-  if (DEBUG) Serial.println((String)"12 (0C) chkConfig c0: " + c0);
-  //config_restart = 1;
+  if ((DEBUG == 1) || (DEBUG == 2)) Serial.println((String)"12 chkConfig c0: " + c0);
 }
 
 void trigger13(){    //operation panel (nextion page 1) was openend, shall show current values. printh 23 02 54 0D
@@ -735,9 +599,9 @@ void trigger13(){    //operation panel (nextion page 1) was openend, shall show 
 
 /////////////////////////
 
-void update_nextion(int lamp_pos){    // called if current lamp was switched by radio buttons
+void update_nextion(int lamp_pos){    // called if lamp was changed by lamp buttons 1-4 on nextion
   
-  if (lamp_pos == -1) return;   //position not allocated/assigned to a lamp; i.e. less than 4 lamps total
+  if (lamp_pos == -1) return;         //position not allocated/assigned to a lamp; i.e. less than 4 lamps total
 
   update_wled_status(info_ip_char[lamp_pos], lamp_pos);  //pulls the current json status and updates parts of the global arrays
 
@@ -756,8 +620,9 @@ void update_nextion(int lamp_pos){    // called if current lamp was switched by 
     paletteORsolid[lamp_pos] = 1;
     rot_data[0] = color[lamp_pos];
   }
-  
-  rot_data[1] = state_seg_fx[lamp_pos];
+
+  int fxid = search_fxchar_id_array( lamp_pos, info_fxcount [lamp_pos], state_seg_fx[lamp_pos] );
+  rot_data[1] = fxchar_ids[lamp_pos][fxid];
     
   myNex.writeNum("butOnOff.val", state_on[lamp_pos]);
   myNex.writeStr("lamp_name.txt", (String)info_name_char[lamp_pos] );
@@ -766,14 +631,11 @@ void update_nextion(int lamp_pos){    // called if current lamp was switched by 
   char buf [25] = {0};
   for (int i = 0; i < pallen -4; i++) { buf[i] = pal_char[lamp_pos][state_seg_pal[lamp_pos]][i]; }   //eliminate _ID at the end of palette name
   myNex.writeStr("pal_name.txt",  (String)buf );
-  //myNex.writeStr("pal_name.txt", (String)pal_char[lamp_pos][state_seg_pal[lamp_pos]] );
 
   int fxlen = strlen(fx_char[lamp_pos][state_seg_fx[lamp_pos]]);
   buf [25] = {0};
   for (int i = 0; i < fxlen -4; i++) { buf[i] = fx_char[lamp_pos][state_seg_fx[lamp_pos]][i]; }   //eliminate _ID at the end of fx name
   myNex.writeStr("fx_name.txt",  (String)buf );
-  //myNex.writeStr("fx_name.txt", (String)fx_char[lamp_pos][state_seg_fx[lamp_pos]] );
-  
   myNex.writeNum("fx_speed.val", state_seg_sx[lamp_pos]);
   myNex.writeNum("fx_intensity.val", state_seg_ix[lamp_pos]);
 }

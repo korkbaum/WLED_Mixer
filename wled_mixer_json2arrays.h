@@ -29,7 +29,9 @@ const char* pal[MAX_LAMPS][MAX_PAL] = {0};
 char info_name_char[MAX_LAMPS][25] = {0};
 char info_ip_char[MAX_LAMPS][16] = {0};
 char fx_char[MAX_LAMPS][MAX_FX][25] = {0};
+int fxchar_ids[MAX_LAMPS][MAX_FX] = {0};    // to retain the original fx ids after array was sorted
 char pal_char[MAX_LAMPS][MAX_PAL][25] = {0};
+int palchar_ids[MAX_LAMPS][MAX_PAL] = {0};    // to retain the original pal ids after array was sorted
 
 //********************************************************************
 
@@ -61,6 +63,22 @@ void sort_palchar_array(int lamp_id, int array_length) {
           }
       }
   }
+}
+
+
+int search_fxchar_id_array( int lamp_id, int arraysize, int findme ) {   // identify the fx id + name based on ID in sorted array
+  for ( int i=0; i < arraysize; i++ ) {
+    if ( fxchar_ids[lamp_id][i] == findme ) return i;    // position of correct fx id/name found
+  }
+  return -1;
+}
+
+
+int search_palchar_id_array( int lamp_id, int arraysize, int findme ) {   // identify the fx id + name based on ID in sorted array
+  for ( int i=0; i < arraysize; i++ ) {
+    if ( palchar_ids[lamp_id][i] == findme ) return i;    // position of correct fx id/name found
+  }
+  return -1;
 }
 
 
@@ -99,18 +117,35 @@ void json2array(int lamp_id, bool all_data) {     // all data fills in all json 
      sprintf(info_ip_char[lamp_id],"%s",info_ip[lamp_id]);
     
     JsonArray effects = doc["effects"];
+        
   	for (int i = 0; i < info_fxcount[lamp_id]; i++) {	
   		fx[lamp_id][i] = effects[i];
-      sprintf(fx_char[lamp_id][i],"%s_%03d", fx[lamp_id][i], i);   //add the id of the effect (which is just the position in the json) to its name to easily sort it    
+      sprintf(fx_char[lamp_id][i],"%s_%03d", fx[lamp_id][i], i);   //add the id of the effect (which is just the position in the json) to its name to easily extract the ID later    
   	}
-    sort_fxchar_array(lamp_id, info_fxcount[lamp_id]);   // the effect names are unsorted in the json source
+        // skip solid id 0 somehow
+    sort_fxchar_array(lamp_id, info_fxcount[lamp_id]);            // the effect names are unsorted in the json source
+    
+    for (int i = 0; i < info_fxcount[lamp_id]; i++) {             // extract IDs from freshly sorted fxchar_array and store in separate array
+      int fxlen = strlen(fx_char[lamp_id][i]);
+      char buf[4] = {0};
+      sprintf(buf, "%c%c%c", fx_char[lamp_id][i][fxlen-3], fx_char[lamp_id][i][fxlen-2], fx_char[lamp_id][i][fxlen-1] );
+      fxchar_ids[lamp_id][i] = atoi(buf);
+      //Serial.printf("i: %d buf: %s fxchar_ids[lamp_id][i]: %d fx_char name: %s\r\n", i, buf, fxchar_ids[lamp_id][i] ,fx_char[lamp_id][i]);
+    }
   
     JsonArray palettes = doc["palettes"];
   	for (int i = 0; i < info_palcount[lamp_id]; i++) {
  		  pal[lamp_id][i] = palettes[i];
-      sprintf(pal_char[lamp_id][i],"%s_%03d", pal[lamp_id][i], i);   //add the id of the palette (which is just the position in the json) to its name to easily sort it
+      sprintf(pal_char[lamp_id][i],"%s_%03d", pal[lamp_id][i], i);   //add the id of the palette (which is just the position in the json) to its name to easily extract the ID later
   	}
     sort_palchar_array(lamp_id, info_palcount[lamp_id]);   // the effect names are unsorted in the json source
+    
+    for (int i = 0; i < info_palcount[lamp_id]; i++) {             // extract IDs from freshly sorted fxchar_array and store in separate array
+      int pallen = strlen(pal_char[lamp_id][i]);
+      char buf[4] = {0};
+      sprintf(buf, "%c%c%c", pal_char[lamp_id][i][pallen-3], pal_char[lamp_id][i][pallen-2], pal_char[lamp_id][i][pallen-1] );
+      palchar_ids[lamp_id][i] = atoi(buf);
+    }
   }
 }
 

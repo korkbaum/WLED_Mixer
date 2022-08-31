@@ -519,26 +519,26 @@ void trigger4(){    //RadioButton "r3" Touch Release Event printh 23 02 54 04
 void trigger5(){    //Button "butPAL" Touch Release Event printh 23 02 54 05
   butPAL = myNex.readNumber("butPAL.val");
   if ((DEBUG == 1) || (DEBUG == 2)) Serial.println((String)"5 butPAL: " + butPAL);
-  paletteORsolid[selected_lamp] = 0;
+  paletteORsolid[selected_lamp] = 0;        // to control what rot_encoder[0] is doing
   myNex.writeNum("butPAL.val", 1);
   myNex.writeNum("butSC.val", 0);
   // palette value changes are handled in set_rot function
   // set fx mode to last active effect
   send_udp (info_ip_char[selected_lamp], (String)"{\"seg\":[{\"id\":0, \"fx\":" + (String)state_seg_fx[selected_lamp] + "}]}" );
-  // ?? update_nextion();
+  update_nextion(selected_lamp);
 }
 
 void trigger6(){    //Button "butSC" Touch Release Event printh 23 02 54 06
   butSC = myNex.readNumber("butSC.val");
   if ((DEBUG == 1) || (DEBUG == 2)) Serial.println((String)"6 butSC: " + butSC);
   //paletteORsolid[selected_lamp] = !paletteORsolid[selected_lamp];
-  paletteORsolid[selected_lamp] = 1;
+  paletteORsolid[selected_lamp] = 1;        // to control what rot_encoder[0] is doing
   myNex.writeNum("butPAL.val", 0);
   myNex.writeNum("butSC.val", 1);
   // Solid Color changes are handled in set_rot function
   // set solid color mode
   send_udp (info_ip_char[selected_lamp], (String)"{\"seg\":[{\"id\":0, \"fx\":0}]}" ); 
-   // ?? update_nextion();   
+  update_nextion(selected_lamp);   
 }
 
 void trigger7(){    //Button "butOnOff" Touch Release Event printh 23 02 54 07
@@ -569,23 +569,25 @@ void trigger9(){    //Slider "fx_intensity" Touch Move Event printh 23 02 54 09
 void trigger10(){    //Button "fx_go" Touch Release Event printh 23 02 54 0A
   fx_go = myNex.readNumber("fx_go.val");
   if ((DEBUG == 1) || (DEBUG == 2)) Serial.println((String)"10 (0A) fx_go: " + fx_go);
-  state_seg_fx[selected_lamp] = rot_data[1];
+  //state_seg_fx[selected_lamp] = rot_data[1];
   
   // last 3 digits of fx_char[] name hold the ID of the effect
   int fxlen = strlen(fx_char[selected_lamp][rot_data[1]]);
-  String fxID =  (String)fx_char[selected_lamp][rot_data[1]][fxlen-3] + (String)fx_char[selected_lamp][rot_data[1]][fxlen-2] + (String)fx_char[selected_lamp][rot_data[1]][fxlen-1];  
-  send_udp (info_ip_char[selected_lamp], (String)"{\"seg\":[{\"id\":0, \"fx\":" + fxID + "}]}" );
+  char fxID[4] = { fx_char[selected_lamp][rot_data[1]][fxlen-3], fx_char[selected_lamp][rot_data[1]][fxlen-2], fx_char[selected_lamp][rot_data[1]][fxlen-1] };  
+  send_udp (info_ip_char[selected_lamp], "{\"seg\":[{\"id\":0, \"fx\":" + (String)fxID + "}]}" );
+  state_seg_fx[selected_lamp] = atoi(fxID);
 }
 
 void trigger11(){    //Button "pal_go" Touch Release Event of the button: printh 23 02 54 0B
   pal_go = myNex.readNumber("pal_go.val");
   if ((DEBUG == 1) || (DEBUG == 2)) Serial.println((String)"11 (0B) pal_go: " + pal_go);
-  state_seg_pal[selected_lamp] = rot_data[0];
+  //state_seg_pal[selected_lamp] = rot_data[0];
   
   // last 3 digits of pal_char[] name hold the ID of the effect
   int pallen = strlen(pal_char[selected_lamp][rot_data[0]]);
-  String palID =  (String)pal_char[selected_lamp][rot_data[0]][pallen-3] + (String)pal_char[selected_lamp][rot_data[0]][pallen-2] + (String)pal_char[selected_lamp][rot_data[0]][pallen-1];  
-  send_udp (info_ip_char[selected_lamp], (String)"{\"seg\":[{\"id\":0, \"pal\":" + palID + "}]}" );
+  char palID[4] = { pal_char[selected_lamp][rot_data[0]][pallen-3], pal_char[selected_lamp][rot_data[0]][pallen-2], pal_char[selected_lamp][rot_data[0]][pallen-1] };  
+  send_udp (info_ip_char[selected_lamp], "{\"seg\":[{\"id\":0, \"pal\":" + (String)palID + "}]}" );
+  state_seg_pal[selected_lamp] = atoi(palID);
 }
 
 void trigger12(){    //Show help info where to upload json config files

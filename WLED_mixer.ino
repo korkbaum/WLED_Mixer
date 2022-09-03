@@ -2,10 +2,9 @@
 // 2d-Effekte raus
 // nur aktivierte fx + pals holen....
 // Invalide/leere wledjson files
-// help info im Nextion statt checkbox
+// ret-values nach update_nextion ??
 
-
-#define DEBUG 0     // 0 very basic Serial debug messages, 1 = more than just basic, 2 = full
+#define DEBUG 1     // 0 very basic Serial debug messages, 1 = more than just basic, 2 = full
 
 #include <i2cEncoderMiniLib.h>  //for 2x rotary encoders via I2C 
 
@@ -15,12 +14,12 @@
 //Class initialization with the I2C addresses
 i2cEncoderMiniLib encoder[2] = { i2cEncoderMiniLib(I2C_ADDRESS_ROT1), i2cEncoderMiniLib(I2C_ADDRESS_ROT2)};
 
-#define INTPIN 23
-#define MIDSPEED  3      // threshold for medium speed of rot encoder
-#define FASTSPEED 15     // threshold for top speed of rot encoder
-#define QUICK 5          // rot value increase mid value 
+#define INTPIN 23        // mini encoder interrupt pin
+#define MIDSPEED  5      // threshold for medium speed of rot encoder
+#define FASTSPEED 20     // threshold for high speed of rot encoder
+#define QUICK 5          // rot value increase medium value 
 #define VERYQUICK 15     // rot value increase high value 
-#define JITTER   3       // tolerance to take pot reading changes serious
+#define JITTER   3       // tolerance before pot reading changes are taken serious
 
 int rot_data[2] = {0};   // Current positions of rot encoders
 int rot_data_old[2] = {0};
@@ -67,28 +66,21 @@ EasyNex myNex(Serial2);
 //Nextion touch display button variables
 bool bt0, bt1, bt2, bt3 = 0;
 int selected_lamp = 0;
-bool butPAL = 0;
 bool butSC = 0;
 bool butOnOff = 0;
 bool paletteORsolid[MAX_LAMPS] = {0};
-int color[MAX_LAMPS] = {0};
+
 uint32_t fx_speed = 128;
 uint32_t fx_intensity = 128;
 bool fx_go = 0;
-bool pal_go = 0;
-bool c0 = 0;
-
 
 unsigned long lastTime = 0;
 unsigned long timerDelay = 100;
 
 int lamp_count = 0;
-int lamp_id[4] = {-1};   // ids are "random"; as found in the network. -1 = undefined
-int lamp_pos[4] = {-1};  // position of lamp_id[] on the mixer hardware, sliders 1-4 from right to left. -1 = undefined    
-int voltages[9] = {0};   // for pot value readings. 2x4 from 2xADS1115 over I2C, 1* on GPIO 14
+int lamp_id[4] = {-1};      // ids are given by wledjson file postfix in SPIFFs. -1 = undefined
+int voltages[9] = {0};      // for pot value readings. 2x4 from 2xADS1115 over I2C, 1* on GPIO 14
 int voltages_old[9] = {0};
-
-//WiFiUDP udp;  //moved to send_udp as local object
 
 //Pre-Declarations
 void startOTA();
@@ -101,11 +93,12 @@ float readChannel_adc2(ADS1115_MUX channel);
 
 
 ////////////////////////////////////////////////////////////////
+
 void setup() {
 
-  Serial.begin(115200);
+  if (DEBUG >= 1) Serial.begin(115200);
 
-  // for reading I2C, potentiometer values over ADS1115 and rot encoder values over mini encoder
+  // for reading I2C, potentiometer values over ADS1115 (2x) and rot encoder values (2x)
   Wire.begin(21, 22);
   adc_init();
 
@@ -115,8 +108,8 @@ void setup() {
   init_encoder(1);
 
   // for Nextion display communication 
-  Serial2.begin(9600, SERIAL_8N1, 16, 17);
-  myNex.begin(9600); delay(200);
+  Serial2.begin(38400, SERIAL_8N1, 16, 17);
+  myNex.begin(38400); delay(200);
   myNex.writeStr("page 0"); 
 
   // Connect to wifi
@@ -137,6 +130,8 @@ void setup() {
   
   bool files = readFile(SPIFFS, "/wledjson0", 0);
   if (!files) {
+    // call up page on nextion
+    myNex.writeStr("page 2");
     Serial.println("No wledjson files found. Please upload valid json file via http://" + WiFi.localIP().toString() );
   } else {
     read_json_files();
@@ -155,14 +150,14 @@ void setup() {
     Serial.println("*************setup************");
      for (int j = 0; j < lamp_count; j++){  
       int fxid = search_fxchar_id_array( j, info_fxcount [j], state_seg_fx[j] );
-      Serial.printf("j: %d ID: %d POS: %d name: %s IP: %s FX: %d FX Name: %s \r\n", j, lamp_id[j], lamp_pos[j], info_name_char[j], info_ip_char[j], state_seg_fx[j], fx_char[j][fxid] );
+      Serial.printf("j: %d ID: %d  name: %s IP: %s FX: %d FX Name: %s \r\n", j, lamp_id[j], info_name_char[j], info_ip_char[j], state_seg_fx[j], fx_char[j][fxid] );
       if (DEBUG == 2) {
         for (int i = 0; i < info_fxcount[j]; i++) { 
-          Serial.println(fx_char[j][i]);
+          Serial.printf("fx_char[j][i]:  fx_char[%d][%d]: %s\r\n", j, i, fx_char[j][i] );
         }
         Serial.printf( "\r\nlamp_id: %d palettes \r\n", j);
         for (int i = 0; i < info_palcount[j]; i++) {
-          Serial.println(pal_char[j][i]);
+          Serial.printf("pal_char[j][i]:  pal_char[%d][%d]: %s\r\n", j, i, pal_char[j][i] );
         }
       }
       Serial.println("********** setup end **************");
@@ -172,6 +167,7 @@ void setup() {
 } //setup end
 
 ///////////////////////////////
+
 void loop() {
 
   server.handleClient();
@@ -198,14 +194,14 @@ void loop() {
     for (int j = 0; j < 9; j++) { 
       voltages_old[j] = voltages[j];    // keep last readings to find any changes
     }
-    voltages[0] = map(readChannel_adc1(ADS1115_COMP_0_GND), 0.0, 4860, 255, 0); // value range between 0.0 and 4860 mV
-    voltages[1] = map(readChannel_adc1(ADS1115_COMP_1_GND), 0.0, 4860, 255, 0);
-    voltages[2] = map(readChannel_adc1(ADS1115_COMP_2_GND), 0.0, 4860, 255, 0);
-    voltages[3] = map(readChannel_adc1(ADS1115_COMP_3_GND), 0.0, 4860, 255, 0);
-    voltages[4] = map(readChannel_adc2(ADS1115_COMP_0_GND), 0.0, 4860, 0, 255);
-    voltages[5] = map(readChannel_adc2(ADS1115_COMP_1_GND), 0.0, 4860, 0, 255);
-    voltages[6] = map(readChannel_adc2(ADS1115_COMP_2_GND), 0.0, 4860, 0, 255);
-    voltages[7] = map(readChannel_adc2(ADS1115_COMP_3_GND), 0.0, 4860, 0, 255);
+    voltages[0] = map(readChannel_adc1(ADS1115_COMP_0_GND), 0.0, 4860, 255, 1); // value range between 0.0 and 4860 mV
+    voltages[1] = map(readChannel_adc1(ADS1115_COMP_1_GND), 0.0, 4860, 255, 1); // dont go to zero to distinguish between off atate and low brightness
+    voltages[2] = map(readChannel_adc1(ADS1115_COMP_2_GND), 0.0, 4860, 255, 1);
+    voltages[3] = map(readChannel_adc1(ADS1115_COMP_3_GND), 0.0, 4860, 255, 1);
+    voltages[4] = map(readChannel_adc2(ADS1115_COMP_0_GND), 0.0, 4860, 1, 255);
+    voltages[5] = map(readChannel_adc2(ADS1115_COMP_1_GND), 0.0, 4860, 1, 255);
+    voltages[6] = map(readChannel_adc2(ADS1115_COMP_2_GND), 0.0, 4860, 1, 255);
+    voltages[7] = map(readChannel_adc2(ADS1115_COMP_3_GND), 0.0, 4860, 1, 255);
     voltages[8] = map(analogRead(36), 0, 4095, 255, 0);    // value range between 0 and 4095
     lastTime = millis();
   }
@@ -223,8 +219,10 @@ void loop() {
           master_onoff = 0;
           for ( int i = 0; i < lamp_count; i++ ){
             send_udp (info_ip_char[i], (String)"{\"on\":false,\"PWRon\":false}" );
+            state_on[i] = 0;
+            state_PWRon[i] = 0;
           }
-          update_nextion(lamp_pos[selected_lamp]);
+          myNex.writeNum("butOnOff.val", 0);
         }
       } 
       else if (voltages[8] > 200) {
@@ -233,8 +231,10 @@ void loop() {
           master_onoff = 1;
           for ( int i = 0; i < lamp_count; i++ ){
             send_udp (info_ip_char[i], (String)"{\"on\":true,\"PWRon\":true}" );
+            state_on[i] = 1;
+            state_PWRon[i] = 1;
           }
-          update_nextion(lamp_pos[selected_lamp]);
+          myNex.writeNum("butOnOff.val", 1);
         }
       }
     }
@@ -246,13 +246,12 @@ void loop() {
 
 
 void read_json_files(){
+  
     if ((DEBUG == 1) || (DEBUG == 2)) Serial.print("files found: ");
     lamp_count = listDir(SPIFFS, "/", 0);
     
     for (int j = 0; j < lamp_count; j++){
-    
       lamp_id[j] = j;     // in case we have less than 4 lamps, array values will remain -1 as initialized
-      lamp_pos[j] = j;    // position can be changed on web config page later
       
       char buf[10];
       sprintf(buf, "%s%d", "/wledjson", j);      //generate filename
@@ -269,11 +268,10 @@ void read_json_files(){
 }
 
 
-
-void update_wled_status(char * IP, int lamp_ID) {   // get current status such as fx for display on nextion
+void update_wled_status(char * IP, int lamp_ID) {   // get current status such as fx, pal etc. for display on nextion
   HTTPClient http;
   String addr = "http://" + (String)IP + "/json";
-  if ((DEBUG == 1) || (DEBUG == 2)) Serial.println(addr);
+  if (DEBUG == 2) Serial.println(addr);
   
   http.begin(addr);
   int httpResponseCode = http.GET();
@@ -306,18 +304,18 @@ void adjust_brightness(int pot_ID, int voltage) {    // send changed brightness 
   // 8 = crossfade / master slider handled in loop
 
   if (pot_ID < 4) {                         // wheel was moved, wheel are for bri
-    if (lamp_pos[pot_ID] == -1) return;
+    if (lamp_id[pot_ID] == -1) return;
     char sendbri[15] = "\0";
     sprintf(sendbri, "%s%d%s","{\"bri\":", voltage, "}");
-    if (DEBUG == 2) Serial.printf("\r\n Pot ID: %d  Name: %s  IP: %s  Position: %d  JSON: %s \r\n ", pot_ID, info_name_char[lamp_pos[pot_ID]], info_ip_char[lamp_pos[pot_ID]], lamp_pos[pot_ID], sendbri);
-    send_udp(info_ip_char[lamp_pos[pot_ID]], (String)sendbri);
+    if (DEBUG == 2) Serial.printf("\r\n Wheel Pot ID: %d  Name: %s  IP: %s  Position: %d  JSON: %s \r\n ", pot_ID, info_name_char[lamp_id[pot_ID]], info_ip_char[lamp_id[pot_ID]], lamp_id[pot_ID], sendbri);
+    send_udp(info_ip_char[lamp_id[pot_ID]], (String)sendbri);
   } 
   else if (pot_ID >= 4 && pot_ID < 8) {   // slider was moved, sliders are for PWRbri
-    if (lamp_pos[7 - pot_ID] == -1) return;
+    if (lamp_id[7 - pot_ID] == -1) return;
     char sendPWRbri[20] = "\0";
     sprintf(sendPWRbri, "%s%d%s", "{\"PWRbri\":", voltage, "}");
-    if (DEBUG == 2) Serial.printf("\r\n Pot ID: %d  Name: %s  IP: %s  Position: %d  PWR JSON: %s \r\n ", pot_ID, info_name_char[lamp_pos[7 - pot_ID]], info_ip_char[lamp_pos[7 - pot_ID]], lamp_pos[7 - pot_ID], sendPWRbri);
-    send_udp(info_ip_char[lamp_pos[7 - pot_ID]], (String)sendPWRbri);   // 7- because we have 8 wheels+sliders but only 4 positions
+    if (DEBUG == 2) Serial.printf("\r\n Slider Pot ID: %d  Name: %s  IP: %s  Position: %d  PWR JSON: %s \r\n ", pot_ID, info_name_char[lamp_id[7 - pot_ID]], info_ip_char[lamp_id[7 - pot_ID]], lamp_id[7 - pot_ID], sendPWRbri);
+    send_udp(info_ip_char[lamp_id[7 - pot_ID]], (String)sendPWRbri);   // 7- because we have 8 wheels+sliders but only 4 positions
   } 
 }
 
@@ -388,8 +386,7 @@ void init_encoder(int enc_ID){
   encoder[enc_ID].onDecrement = encoder_decrement;
   //encoder[enc_ID].onMax = encoder_max;    //disabled, no limits to always get steps back for transmission
   //encoder[enc_ID].onMin = encoder_min;
-  /* Enable the I2C Encoder V2 interrupts according to the previus attached callback */
-  encoder[enc_ID].autoconfigInterrupt();
+  encoder[enc_ID].autoconfigInterrupt();    // Enable the I2C Encoder V2 interrupts
 }
 
 //Callback when the CVAL is incremented
@@ -407,8 +404,9 @@ void encoder_decrement(i2cEncoderMiniLib* obj) {
 
 
 void set_rot(int encID, int sign){    // determine speed level, set rot step value and sign of result (according to rot encoder direction)
+
+  static int rot_data_old = 0;
   
-  //rot_data[encID] = encoder[encID].readCounterByte();
   myspeed[encID] = rotspeed(rot_data[encID], encID);      //check how fast encoder knob was moved
 
   if (myspeed[encID] > FASTSPEED) {
@@ -425,11 +423,19 @@ void set_rot(int encID, int sign){    // determine speed level, set rot step val
   }
   
   if (encID == 0) {           // encID = 0 is for palette or color changes
+ 
     if (paletteORsolid[selected_lamp]) {     // paletteORsolid: 1 = Solid Color, use rot encoder 0 as color wheel    
-      color[selected_lamp] = color[selected_lamp] + (rot_data[0] * sign * 10);
-      if (DEBUG == 2) Serial.println("set_rot color[selected_lamp]: " + (String(color[selected_lamp])) + " rot[0]: " + String(rot_data[0]));
-      if (color[selected_lamp] <= 0) color[selected_lamp] = 65500;
-      else if (color[selected_lamp] > 65500) color[selected_lamp] = 0;
+      if (rot_data[0] < 0) rot_data[0] = 360;
+      else if (rot_data[0] > 360) rot_data[0] = 0;
+
+      int color_tmp = color[selected_lamp] + (abs((rot_data[0] - rot_data_old)) * 554 * sign);
+      if (color_tmp <= 0) color_tmp = 65500;
+      else if (color_tmp > 65500) color_tmp = 0;
+      
+      color[selected_lamp] = color_tmp;
+      Serial.println("set_rot color[selected_lamp]: " + (String(color[selected_lamp])) + " rot[0]: " + String(rot_data[0]));
+      
+      rot_data_old = rot_data[0];
       HSV2RGB( (float)color[selected_lamp], 100.0, 100.0 );    // converts current color value to RGB and sends it to selected_lamp via udp
     } 
     else {                     // paletteORsolid: 0 = palette changes
@@ -437,9 +443,9 @@ void set_rot(int encID, int sign){    // determine speed level, set rot step val
       if (rot_data[0] > info_palcount[selected_lamp] -1) rot_data[0] = info_palcount[selected_lamp] -1;   //don't overrun pal ID range
      
       int pallen = strlen(pal_char[selected_lamp][rot_data[0]]);
-      char buf [25] = {0};
-      for (int i = 0; i < pallen -4; i++) { buf[i] = pal_char[selected_lamp][rot_data[0]][i]; }   //eliminate _ID at the end of palette name
-      myNex.writeStr("pal_name.txt",  (String)buf );
+      char palbuf [25] = {0};
+      for (int i = 0; i < pallen -4; i++) { palbuf[i] = pal_char[selected_lamp][rot_data[0]][i]; }   //eliminate _ID at the end of palette name
+      myNex.writeStr("pal_name.txt", (String)palbuf );
     }
   }
   else {                      // encID = 1 is for fx changes only
@@ -447,9 +453,9 @@ void set_rot(int encID, int sign){    // determine speed level, set rot step val
     if (rot_data[1] > info_fxcount[selected_lamp] -1) rot_data[1] = info_fxcount[selected_lamp] -1;     //don't overrun fx ID range
     
     int fxlen = strlen(fx_char[selected_lamp][rot_data[1]]);
-    char buf [25] = {0};
-    for (int i = 0; i < fxlen -4; i++) { buf[i] = fx_char[selected_lamp][rot_data[1]][i]; }   //eliminate _ID at the end of fx name
-    myNex.writeStr("fx_name.txt",  (String)buf );
+    char fxbuf [25] = {0};
+    for (int i = 0; i < fxlen -4; i++) { fxbuf[i] = fx_char[selected_lamp][rot_data[1]][i]; }   //eliminate _ID at the end of fx name
+    myNex.writeStr("fx_name.txt",  (String)fxbuf );
   }
 
 }
@@ -491,54 +497,44 @@ int rotspeed(int i, int encID) {      //i = current pos value of encoder[encID]
 void trigger1(){    //RadioButton "r0" Touch Release Event printh 23 02 54 01
   bt0 = myNex.readNumber("bt0.val");
   if ((DEBUG == 1) || (DEBUG == 2)) Serial.println((String)"bt0: " + bt0);
-  update_nextion(lamp_pos[0]);
   selected_lamp = 0;
+  update_nextion(selected_lamp);
 }
 
 void trigger2(){    //RadioButton "r1" Touch Release Event printh 23 02 54 02
   bt1 = myNex.readNumber("bt1.val");
   if ((DEBUG == 1) || (DEBUG == 2)) Serial.println((String)"bt1: " + bt1);
-  update_nextion(lamp_pos[1]);
   selected_lamp = 1;
+  update_nextion(selected_lamp);
 }
 
 void trigger3(){    //RadioButton "r2" Touch Release Event printh 23 02 54 03
   bt2 = myNex.readNumber("bt2.val");
   if ((DEBUG == 1) || (DEBUG == 2)) Serial.println((String)"bt2: " + bt2);
-  update_nextion(lamp_pos[2]);
   selected_lamp = 2;
+  update_nextion(selected_lamp);
 }
 
 void trigger4(){    //RadioButton "r3" Touch Release Event printh 23 02 54 04
   bt3 = myNex.readNumber("bt3.val");
   if ((DEBUG == 1) || (DEBUG == 2)) Serial.println((String)"bt3: " + bt3);
-  update_nextion(lamp_pos[3]);
   selected_lamp = 3;
+  update_nextion(selected_lamp);
 }
 
-void trigger5(){    //Button "butPAL" Touch Release Event printh 23 02 54 05
-  butPAL = myNex.readNumber("butPAL.val");
-  if ((DEBUG == 1) || (DEBUG == 2)) Serial.println((String)"5 butPAL: " + butPAL);
-  paletteORsolid[selected_lamp] = 0;        // to control what rot_encoder[0] is doing
-  myNex.writeNum("butPAL.val", 1);
-  myNex.writeNum("butSC.val", 0);
-  // palette value changes are handled in set_rot function
-  // set fx mode to last active effect
-  send_udp (info_ip_char[selected_lamp], (String)"{\"seg\":[{\"id\":0, \"fx\":" + (String)state_seg_fx[selected_lamp] + "}]}" );
-  update_nextion(selected_lamp);
+void trigger5(){    //
 }
 
 void trigger6(){    //Button "butSC" Touch Release Event printh 23 02 54 06
   butSC = myNex.readNumber("butSC.val");
+  myNex.writeNum("butSC.pco", 64512);
+  myNex.writeNum("fx_go.pco", 54938);
   if ((DEBUG == 1) || (DEBUG == 2)) Serial.println((String)"6 butSC: " + butSC);
-  //paletteORsolid[selected_lamp] = !paletteORsolid[selected_lamp];
+ 
   paletteORsolid[selected_lamp] = 1;        // to control what rot_encoder[0] is doing
-  myNex.writeNum("butPAL.val", 0);
-  myNex.writeNum("butSC.val", 1);
+  // set solid color mode fx=0
+  send_udp (info_ip_char[selected_lamp], (String)"{\"seg\":[{\"id\":0, \"fx\":0}]}" );
   // Solid Color changes are handled in set_rot function
-  // set solid color mode
-  send_udp (info_ip_char[selected_lamp], (String)"{\"seg\":[{\"id\":0, \"fx\":0}]}" ); 
-  update_nextion(selected_lamp);   
 }
 
 void trigger7(){    //Button "butOnOff" Touch Release Event printh 23 02 54 07
@@ -568,78 +564,90 @@ void trigger9(){    //Slider "fx_intensity" Touch Move Event printh 23 02 54 09
 
 void trigger10(){    //Button "fx_go" Touch Release Event printh 23 02 54 0A
   fx_go = myNex.readNumber("fx_go.val");
+  myNex.writeNum("butSC.pco", 54938);
+  myNex.writeNum("fx_go.pco", 64512);
   if ((DEBUG == 1) || (DEBUG == 2)) Serial.println((String)"10 (0A) fx_go: " + fx_go);
-  //state_seg_fx[selected_lamp] = rot_data[1];
+  paletteORsolid[selected_lamp] = 0;        // to control what rot_encoder[0] is doing
   
-  // last 3 digits of fx_char[] name hold the ID of the effect
+  // last 3 digits of fx_char[] name hold the ID of the effect fx_char[selected_lamp][rot_data[1]]
   int fxlen = strlen(fx_char[selected_lamp][rot_data[1]]);
   char fxID[4] = { fx_char[selected_lamp][rot_data[1]][fxlen-3], fx_char[selected_lamp][rot_data[1]][fxlen-2], fx_char[selected_lamp][rot_data[1]][fxlen-1] };  
   send_udp (info_ip_char[selected_lamp], "{\"seg\":[{\"id\":0, \"fx\":" + (String)fxID + "}]}" );
   state_seg_fx[selected_lamp] = atoi(fxID);
-}
 
-void trigger11(){    //Button "pal_go" Touch Release Event of the button: printh 23 02 54 0B
-  pal_go = myNex.readNumber("pal_go.val");
-  if ((DEBUG == 1) || (DEBUG == 2)) Serial.println((String)"11 (0B) pal_go: " + pal_go);
-  //state_seg_pal[selected_lamp] = rot_data[0];
-  
-  // last 3 digits of pal_char[] name hold the ID of the effect
+   // last 3 digits of pal_char[] name hold the ID of the effect
   int pallen = strlen(pal_char[selected_lamp][rot_data[0]]);
   char palID[4] = { pal_char[selected_lamp][rot_data[0]][pallen-3], pal_char[selected_lamp][rot_data[0]][pallen-2], pal_char[selected_lamp][rot_data[0]][pallen-1] };  
   send_udp (info_ip_char[selected_lamp], "{\"seg\":[{\"id\":0, \"pal\":" + (String)palID + "}]}" );
   state_seg_pal[selected_lamp] = atoi(palID);
 }
 
-void trigger12(){    //Show help info where to upload json config files
-  c0 = myNex.readNumber("c0.val");
-  if ((DEBUG == 1) || (DEBUG == 2)) Serial.println((String)"12 chkConfig c0: " + c0);
+void trigger11(){    //operation panel (nextion page 1) was openend, shall show current values. printh 23 02 54 0B
+    update_nextion(0);
 }
 
-void trigger13(){    //operation panel (nextion page 1) was openend, shall show current values. printh 23 02 54 0D
-  update_nextion(0);
-}
 
 /////////////////////////
 
-void update_nextion(int lamp_pos){    // called if lamp was changed by lamp buttons 1-4 on nextion
+void update_nextion(int lamp_id){    // called if lamp was changed by lamp buttons 1-4 on nextion
   
-  if (lamp_pos == -1) return;         //position not allocated/assigned to a lamp; i.e. less than 4 lamps total
+  if (lamp_id == -1) return;         // position not allocated/assigned to a lamp; i.e. less than 4 lamps total
 
-  update_wled_status(info_ip_char[lamp_pos], lamp_pos);  //pulls the current json status and updates parts of the global arrays
-
-  // calculate and save current solid color
-  color[lamp_pos] = RGB2HSV( (float)state_col_R[lamp_pos], (float)state_col_G[lamp_pos], (float)state_col_B[lamp_pos] );
-
-  if (state_seg_fx[lamp_pos] != 0) {    // some fx is active, not solid color
-    myNex.writeNum("butSC.val", 0); 
-    myNex.writeNum("butPAL.val", 1); 
-    paletteORsolid[lamp_pos] = 0;
-    rot_data[0] = state_seg_pal[lamp_pos];
-  } 
-  else {  // Solid Color
-    myNex.writeNum("butSC.val", 1); 
-    myNex.writeNum("butPAL.val", 0); 
-    paletteORsolid[lamp_pos] = 1;
-    rot_data[0] = color[lamp_pos];
+  char butbuf[10] = {0};
+  sprintf (butbuf, "bt%d.pco2", lamp_id);  // show ongoing update with button text color change
+  char butbuf_save[10] = {0};
+  strncpy(butbuf_save, butbuf, 10);        // we need to know the current button id in the end again
+  
+  myNex.writeNum(butbuf, 65504);            // 54938 = white/normal text, 64512 = orange text, 65504 = yellow text
+  for (int i=0; i< lamp_count; i++) {     
+    if (i != lamp_id) {                     // reset any other buttons to normal text color
+       sprintf (butbuf, "bt%d.pco2", i);
+       myNex.writeNum(butbuf, 54938);
+    }
   }
 
-  int fxid = search_fxchar_id_array( lamp_pos, info_fxcount [lamp_pos], state_seg_fx[lamp_pos] );
-  rot_data[1] = fxchar_ids[lamp_pos][fxid];
-    
-  myNex.writeNum("butOnOff.val", state_on[lamp_pos]);
-  myNex.writeStr("lamp_name.txt", (String)info_name_char[lamp_pos] );
+  update_wled_status(info_ip_char[lamp_id], lamp_id);  //pulls the current json status and updates parts of the global arrays
   
-  int pallen = strlen(pal_char[lamp_pos][state_seg_pal[lamp_pos]]);
-  char buf [25] = {0};
-  for (int i = 0; i < pallen -4; i++) { buf[i] = pal_char[lamp_pos][state_seg_pal[lamp_pos]][i]; }   //eliminate _ID at the end of palette name
-  myNex.writeStr("pal_name.txt",  (String)buf );
+  myNex.writeNum("butOnOff.val", state_on[lamp_id]);
+  myNex.writeStr("lamp_name.txt", (String)info_name_char[lamp_id] );
 
-  int fxlen = strlen(fx_char[lamp_pos][state_seg_fx[lamp_pos]]);
-  buf [25] = {0};
-  for (int i = 0; i < fxlen -4; i++) { buf[i] = fx_char[lamp_pos][state_seg_fx[lamp_pos]][i]; }   //eliminate _ID at the end of fx name
-  myNex.writeStr("fx_name.txt",  (String)buf );
-  myNex.writeNum("fx_speed.val", state_seg_sx[lamp_pos]);
-  myNex.writeNum("fx_intensity.val", state_seg_ix[lamp_pos]);
+  // calculate and save current solid color
+  color[lamp_id] = RGB2HSV( (float)state_col_R[lamp_id], (float)state_col_G[lamp_id], (float)state_col_B[lamp_id] );
+Serial.println(" udate_nextion color[lamp_id]: " + (String)color[lamp_id] );
+  // palette handling
+  int palid = search_palchar_id_array( lamp_id, info_palcount[lamp_id], state_seg_pal[lamp_id] );
+  int pallen = strlen(pal_char[lamp_id][palid]);
+  char palbuf [25] = {0};
+  for (int i = 0; i < pallen -4; i++) { palbuf[i] = pal_char[lamp_id][palid][i]; }   //eliminate _ID at the end of palette name
+  //myNex.writeStr("pal_name.txt",  (String)palbuf );
+  
+  // effect handling
+  int fxid = search_fxchar_id_array( lamp_id, info_fxcount[lamp_id], state_seg_fx[lamp_id] );
+  int fxlen = strlen(fx_char[lamp_id][fxid]);
+  char fxbuf [25] = {0};
+  for (int i = 0; i < fxlen -4; i++) { fxbuf[i] = fx_char[lamp_id][fxid][i]; }   //eliminate _ID at the end of fx name
+  myNex.writeStr("fx_name.txt",  (String)fxbuf );
+  rot_data[1] = fxid;   //start with last chosen fx for this lamp
+    
+  myNex.writeNum("fx_speed.val", state_seg_sx[lamp_id]);
+  myNex.writeNum("fx_intensity.val", state_seg_ix[lamp_id]);
+
+  if (state_seg_fx[lamp_id] != 0) {          // some fx is active, not solid color
+    myNex.writeNum("fx_go.pco", 64512);      // orange text
+    myNex.writeNum("butSC.pco", 54938);      // 54938 = white/normal text
+    myNex.writeStr("pal_name.txt",  (String)palbuf );
+    paletteORsolid[lamp_id] = 0;
+    rot_data[0] = palid;    // start with last chosen palette ID of this lamp
+  } 
+  else {  // Solid Color
+    myNex.writeNum("butSC.pco", 64512);
+    myNex.writeNum("fx_go.pco", 54938);
+    myNex.writeStr("pal_name.txt",  "(Color Wheel Mode)" );
+    paletteORsolid[lamp_id] = 1;
+    rot_data[0] = color[lamp_id];            // start with last chosen color of this lamp
+  }
+
+  myNex.writeNum(butbuf_save, 64512);          // 54938 = white/normal text, 64512 = orange text, 65504 = yellow text
 }
 
 ////////////////////////////
@@ -672,6 +680,10 @@ void HSV2RGB(float H, float S, float V) {      // called with H = rot encoder va
   char payload[35] = "\0";
   sprintf( payload, "%s%s%s%s%s%s%s", "{\"seg\":[{\"col\":[[", Rchar, ",", Gchar, ",", Bchar, "]]}]}" );
   send_udp(info_ip_char[selected_lamp], (String)payload );
+
+  state_col_R [selected_lamp] = R;  // save the current solid color
+  state_col_G [selected_lamp] = G;
+  state_col_B [selected_lamp] = B;
 }
 
 

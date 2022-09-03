@@ -29,9 +29,11 @@ const char* pal[MAX_LAMPS][MAX_PAL] = {0};
 char info_name_char[MAX_LAMPS][25] = {0};
 char info_ip_char[MAX_LAMPS][16] = {0};
 char fx_char[MAX_LAMPS][MAX_FX][25] = {0};
-int fxchar_ids[MAX_LAMPS][MAX_FX] = {0};    // to retain the original fx ids after array was sorted
 char pal_char[MAX_LAMPS][MAX_PAL][25] = {0};
+
+int fxchar_ids[MAX_LAMPS][MAX_FX] = {0};    // to retain the original fx ids after array was sorted
 int palchar_ids[MAX_LAMPS][MAX_PAL] = {0};    // to retain the original pal ids after array was sorted
+int color[MAX_LAMPS] = {0};                   // consolidates the 3 RGB values into one hue value
 
 //********************************************************************
 
@@ -39,12 +41,12 @@ void sort_fxchar_array(int lamp_id, int array_length) {
   int i, j;
   char temp[30] = {0};
   
-  for(i=0; i<= array_length; i++){
-      for(j=i+1; j<= array_length; j++){
-          if( strcmp(fx_char[lamp_id][i], fx_char[lamp_id][j]) > 0 ) {
-            strcpy(temp, fx_char[lamp_id][i]);
-            strcpy(fx_char[lamp_id][i], fx_char[lamp_id][j]);
-            strcpy(fx_char[lamp_id][j], temp);
+  for( i = 1; i < array_length; i++ ){            // start with i=1 to skip solid color
+      for( j = 1; j < array_length-1; j++ ){
+          if( strcmp(fx_char[lamp_id][j], fx_char[lamp_id][j+1]) > 0 ) {
+            strcpy(temp, fx_char[lamp_id][j]);
+            strcpy(fx_char[lamp_id][j], fx_char[lamp_id][j+1]);
+            strcpy(fx_char[lamp_id][j+1], temp);
           }
       }
   }
@@ -54,12 +56,12 @@ void sort_palchar_array(int lamp_id, int array_length) {
   int i, j; 
   char temp[30] = {0};
   
-  for(i=0; i<= array_length; i++){
-      for(j=i+1; j<= array_length; j++){
-          if( strcmp(pal_char[lamp_id][i], pal_char[lamp_id][j]) > 0 ) {
-            strcpy(temp, pal_char[lamp_id][i]);
-            strcpy(pal_char[lamp_id][i], pal_char[lamp_id][j]);
-            strcpy(pal_char[lamp_id][j], temp);
+  for(i = 1; i < array_length; i++){                  // start with 1 to skip default
+      for(j = 1; j < array_length-1; j++){
+          if( strcmp(pal_char[lamp_id][j], pal_char[lamp_id][j+1]) > 0 ) {
+            strcpy(temp, pal_char[lamp_id][j]);
+            strcpy(pal_char[lamp_id][j], pal_char[lamp_id][j+1]);
+            strcpy(pal_char[lamp_id][j+1], temp);
           }
       }
   }
@@ -120,7 +122,8 @@ void json2array(int lamp_id, bool all_data) {     // all data fills in all json 
         
   	for (int i = 0; i < info_fxcount[lamp_id]; i++) {	
   		fx[lamp_id][i] = effects[i];
-      sprintf(fx_char[lamp_id][i],"%s_%03d", fx[lamp_id][i], i);   //add the id of the effect (which is just the position in the json) to its name to easily extract the ID later    
+      sprintf(fx_char[lamp_id][i],"%s_%03d", fx[lamp_id][i], i);   //add the id of the effect (which is just the position in the json) to its name to easily extract the ID later 
+      //Serial.printf("json2array vor sort:  fxchar_[%d][%d] = %s\r\n", lamp_id, i, fx_char[lamp_id][i]);
   	}
         // skip solid id 0 somehow
     sort_fxchar_array(lamp_id, info_fxcount[lamp_id]);            // the effect names are unsorted in the json source
@@ -130,7 +133,7 @@ void json2array(int lamp_id, bool all_data) {     // all data fills in all json 
       char buf[4] = {0};
       sprintf(buf, "%c%c%c", fx_char[lamp_id][i][fxlen-3], fx_char[lamp_id][i][fxlen-2], fx_char[lamp_id][i][fxlen-1] );
       fxchar_ids[lamp_id][i] = atoi(buf);
-      //Serial.printf("i: %d buf: %s fxchar_ids[lamp_id][i]: %d fx_char name: %s\r\n", i, buf, fxchar_ids[lamp_id][i] ,fx_char[lamp_id][i]);
+      //Serial.printf("json2array nach sort buf: %s fxchar_ids[%d][%d]: %d  fx_char[%d][%d] name: %s\r\n", buf, lamp_id, i, fxchar_ids[lamp_id][i], lamp_id, i, fx_char[lamp_id][i]);
     }
   
     JsonArray palettes = doc["palettes"];

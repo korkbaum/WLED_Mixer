@@ -12,7 +12,7 @@ This modified mixer essentially converts any input data, analog or touch, into W
 While I seriously doubt anyone will do the same conversion at least some of the code might be useful for similar projects where hardware control is desired to control WLED devices. 
 
 This is what it looks like now:
-![IMG_0111](https://user-images.githubusercontent.com/16290782/188831693-f6615eca-c747-47a5-b1a7-977c0d5ff49b.JPG)
+![IMG_0113_2](https://user-images.githubusercontent.com/16290782/188838023-04bf8fcd-9ce7-44ae-a3e3-597ca8a97e55.jpg)
 
 Inside view: 
 ![IMG_0102 conv](https://user-images.githubusercontent.com/16290782/188832203-d473bc22-6cb8-4f89-98ea-4d14892e7fd9.jpeg)

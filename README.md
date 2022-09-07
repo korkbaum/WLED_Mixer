@@ -20,7 +20,7 @@ Inside view:
 This is what it looked like before (the 422 model) (from https://www.hifi-archiv.info/Grundig/1966-1/grundig29.jpg):
 ![grundig29](https://user-images.githubusercontent.com/16290782/188831966-dc0bdb3e-7b76-41f7-9854-e24520ee03bc.jpg)
 
-The lights you see in the demo are also built by myself, more details can be found at https://mooodlights.com (in German).
+The lights you see in the demo video (will be added shortly) are also built by myself, more details can be found at https://mooodlights.com (in German).
 
 Let me have any comments or questions.
 

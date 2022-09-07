@@ -1,4 +1,12 @@
-// Turning a 1960s Grundig Stereo Mixer into a WLED Light Mixer device
+/* Turning a 1960s Grundig Stereo Mixer 422 into a WLED Light Mixer device
+
+- Runs on ESP32
+- 2x ADS1115 for 8 analog channels / 8 potentiometer values over I2C 
+- 2x Duppa.net I2C Rotary Encoder Mini
+- Nextion Touch Display NX3224T028
+
+This modified vintage mixer essentially converts any input data, analog or touch, into WLED JSON API calls, sent over WIFI/UDP.
+*/
 
 #define DEBUG 0     // 0 very basic Serial debug messages, 1 = more than just basic, 2 = full
 
@@ -237,6 +245,7 @@ void loop() {
   
 } //loop end
 
+
 ///////////////////////////////////////////////////////////////////
 
 
@@ -334,6 +343,7 @@ void send_udp (char * IP, String payload) {      // e.g. send_udp("{\"on\":false
 
 
 ///////////// ADS1115 ADC over I2C converter
+
 void adc_init() {
   if(!adc1.init()){
     Serial.println("adc1 not connected!");
@@ -428,13 +438,11 @@ void set_rot(int encID, int sign){    // determine speed level, set rot step val
       else if (rot_data[0] > 360) rot_data[0] = 0;
 
       int color_tmp = color[selected_lamp] + (abs((rot_data[0] - rot_data_old[0])) * 554 * sign);
-      //Serial.printf("set_rot1 rot_data[0]: %d  rot_data_old[0]: %d  color[%d]: %d  color_tmp: %d \r\n", rot_data[0], rot_data_old[0], selected_lamp, color[selected_lamp], color_tmp );
-
+     
       if (color_tmp <= 0) color_tmp = 65500;
       else if (color_tmp > 65500) color_tmp = 0;
       
       color[selected_lamp] = color_tmp;
-      //Serial.printf("set_rot2 color[%d]: %d  rot_data[0]: %d \r\n", selected_lamp, color[selected_lamp], rot_data[0] );
       
       rot_data_old[0] = rot_data[0];
       HSV2RGB( (float)color[selected_lamp], 100.0, 100.0 );    // converts current color value to RGB and sends it to selected_lamp via udp
@@ -523,7 +531,7 @@ void trigger4(){    //RadioButton "r3" Touch Release Event printh 23 02 54 04
   update_nextion(selected_lamp);
 }
 
-void trigger5(){    //
+void trigger5(){    // not required any more but too lazy to change all the following trigger events
 }
 
 void trigger6(){    //Button "butSC" Touch Release Event printh 23 02 54 06
@@ -618,7 +626,6 @@ void update_nextion(int lamp_id){    // called if lamp was changed by lamp butto
   myNex.writeNum("butOnOff.val", state_on[lamp_id]);
   myNex.writeStr("lamp_name.txt", (String)info_name_char[lamp_id] );
 
-Serial.println(" udate_nextion color[lamp_id]: " + (String)color[lamp_id] );
   // palette handling
   int palid = search_palchar_id_array( lamp_id, info_palcount[lamp_id], state_seg_pal[lamp_id] );
   int pallen = strlen(pal_char[lamp_id][palid]);
@@ -648,8 +655,6 @@ Serial.println(" udate_nextion color[lamp_id]: " + (String)color[lamp_id] );
     myNex.writeNum("fx_go.pco", 54938);
     myNex.writeStr("pal_name.txt",  "(Color Wheel Mode)" );
     paletteORsolid[lamp_id] = 1;
-    // calculate desired rot[0] start from last saved solid color
-    //rot_data[0] = RGB2HSV( (float)state_col_R[selected_lamp], (float)state_col_G[selected_lamp], (float)state_col_B[selected_lamp] );
   }
 
   myNex.writeNum(butbuf_save, 64512);          // 54938 = white/normal text, 64512 = orange text, 65504 = yellow text
@@ -657,8 +662,8 @@ Serial.println(" udate_nextion color[lamp_id]: " + (String)color[lamp_id] );
 
 ////////////////////////////
 
-void HSV2RGB(float H, float S, float V) {      // called with H = rot encoder value, s, v = 100.0
-  H = H * 0.0054931640625;    //map 0-65536 values to the 0-360 degree range
+void HSV2RGB(float H, float S, float V) {       // called with H = rot encoder value, s, v = 100.0
+  H = H * 0.0054931640625;    					//map 0-65536 values to the 0-360 degree range
   float s = S/100.0;
   float v = V/100.0;
   float C = s * v;

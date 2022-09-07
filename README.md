@@ -1,9 +1,7 @@
-Dear WLED-Community,
-
-I would like to share a pretty quirky project with you; a 1960s Grundig Stereo Mixer 422 was turned into a WLED remote control unit with touch screen.
+A vintage 1960s Grundig Stereo Mixer was turned into a WLED light mixer.
 
 Some technical details:
-- ESP32
+- ESP32 based
 - 2x ADS1115 for 8 analog channels / 8 potentiometer values over I2C 
 - 2x Duppa.net I2C Rotary Encoder Mini
 - Nextion Touch Display NX3224T028
@@ -11,7 +9,7 @@ Some technical details:
 This modified mixer essentially converts any input data, analog or touch, into WLED JSON API calls, sent over WIFI/UDP.
 While I seriously doubt anyone will do the same conversion at least some of the code might be useful for similar projects where hardware control is desired to control WLED devices. 
 
-This is what it looks like now:
+This is what the mixer looks like now:
 ![IMG_0113_2](https://user-images.githubusercontent.com/16290782/188838023-04bf8fcd-9ce7-44ae-a3e3-597ca8a97e55.jpg)
 
 Inside view: 
@@ -26,6 +24,8 @@ https://mooodlights.com/wp-content/uploads/2022/09/WLED-Mixer.mp4
 The lights you see in the video are also built by myself, more details can be found at https://mooodlights.com (in German).
 
 To control any WLED lights with the mixer it is required to copy the http://[WLED-IP-Address]/json contents to files called wledjson0, wledjson1 etc. where the number in the end determines the association to the mixer channels 1-4. The files are uploaded with a very simple upload page the mixer provides. The IP of that upload page is shown in the startup screen. 
+
+I'm using a modified version of WLED for my lights which can be found in my public repository https://github.com/korkbaum/wled_soundreactive_UM_v12.
 
 Let me have any comments or questions.
 

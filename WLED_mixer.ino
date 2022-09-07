@@ -1,10 +1,6 @@
-// on-off, beim starten status nicht ändern
-// 2d-Effekte raus
-// nur aktivierte fx + pals holen....
-// Invalide/leere wledjson files
-// ret-values nach update_nextion ??
+// Turning a 1960s Grundig Stereo Mixer into a WLED Light Mixer device
 
-#define DEBUG 1     // 0 very basic Serial debug messages, 1 = more than just basic, 2 = full
+#define DEBUG 0     // 0 very basic Serial debug messages, 1 = more than just basic, 2 = full
 
 #include <i2cEncoderMiniLib.h>  //for 2x rotary encoders via I2C 
 
@@ -209,8 +205,7 @@ void loop() {
   
   for (int j = 0; j < 9; j++) { 
     if ((voltages[j] < voltages_old[j] - JITTER) || (voltages[j] > voltages_old[j] + JITTER)) {  
-      //if (DEBUG == 2) 
-      Serial.printf("pot changed: %d  all values: %d %d %d %d %d %d %d %d %d\r\n", j, voltages[0], voltages[1], voltages[2], voltages[3], voltages[4], voltages[5], voltages[6], voltages[7], voltages[8]);
+      if (DEBUG == 2) Serial.printf("pot changed: %d  all values: %d %d %d %d %d %d %d %d %d\r\n", j, voltages[0], voltages[1], voltages[2], voltages[3], voltages[4], voltages[5], voltages[6], voltages[7], voltages[8]);
       adjust_brightness(j, voltages[j]);       // now we know what value has chaned, let it send out 
 
       if (voltages[8] < 50) {     // crossfader servers as master on/off switch
@@ -411,8 +406,6 @@ void encoder_decrement(i2cEncoderMiniLib* obj) {
 
 void set_rot(int encID, int sign){    // determine speed level, set rot step value and sign of result (according to rot encoder direction)
 
-  static int rot_data_old = 0;
-  
   myspeed[encID] = rotspeed(rot_data[encID], encID);      //check how fast encoder knob was moved
 
   if (myspeed[encID] > FASTSPEED) {
@@ -434,14 +427,16 @@ void set_rot(int encID, int sign){    // determine speed level, set rot step val
       if (rot_data[0] < 0) rot_data[0] = 360;
       else if (rot_data[0] > 360) rot_data[0] = 0;
 
-      int color_tmp = color[selected_lamp] + (abs((rot_data[0] - rot_data_old)) * 554 * sign);
+      int color_tmp = color[selected_lamp] + (abs((rot_data[0] - rot_data_old[0])) * 554 * sign);
+      //Serial.printf("set_rot1 rot_data[0]: %d  rot_data_old[0]: %d  color[%d]: %d  color_tmp: %d \r\n", rot_data[0], rot_data_old[0], selected_lamp, color[selected_lamp], color_tmp );
+
       if (color_tmp <= 0) color_tmp = 65500;
       else if (color_tmp > 65500) color_tmp = 0;
       
       color[selected_lamp] = color_tmp;
-      Serial.printf("set_rot color[%d]: %d  rot_data[0]: %d \r\n", selected_lamp, color[selected_lamp], rot_data[0] );
+      //Serial.printf("set_rot2 color[%d]: %d  rot_data[0]: %d \r\n", selected_lamp, color[selected_lamp], rot_data[0] );
       
-      rot_data_old = rot_data[0];
+      rot_data_old[0] = rot_data[0];
       HSV2RGB( (float)color[selected_lamp], 100.0, 100.0 );    // converts current color value to RGB and sends it to selected_lamp via udp
     } 
     else {                     // paletteORsolid: 0 = palette changes
@@ -454,7 +449,7 @@ void set_rot(int encID, int sign){    // determine speed level, set rot step val
       myNex.writeStr("pal_name.txt", (String)palbuf );
     }
   }
-  else {                      // encID = 1 is for fx changes only
+  else {        // encID == 1 is for fx changes only
     if (rot_data[1] < 0) rot_data[1] = 0;
     if (rot_data[1] > info_fxcount[selected_lamp] -1) rot_data[1] = info_fxcount[selected_lamp] -1;     //don't overrun fx ID range
     
@@ -539,8 +534,8 @@ void trigger6(){    //Button "butSC" Touch Release Event printh 23 02 54 06
   if ((DEBUG == 1) || (DEBUG == 2)) Serial.println((String)"6 butSC: " + butSC);
  
   paletteORsolid[selected_lamp] = 1;        // to control what rot_encoder[0] is doing
-  // calculate current solid color
-  //color[selected_lamp] = RGB2HSV( (float)state_col_R[selected_lamp], (float)state_col_G[selected_lamp], (float)state_col_B[selected_lamp] );
+  // calculate current rot[0] start from current solid color
+  rot_data[0] = RGB2HSV( (float)state_col_R[selected_lamp], (float)state_col_G[selected_lamp], (float)state_col_B[selected_lamp] );
   // palid init?
   
   state_seg_fx[selected_lamp] = 0;        // set solid color mode fx=0
@@ -594,7 +589,8 @@ void trigger10(){    //Button "fx_go" Touch Release Event printh 23 02 54 0A
 }
 
 void trigger11(){    //operation panel (nextion page 1) was openend, shall show current values. printh 23 02 54 0B
-    update_nextion(0);
+    selected_lamp = 0;
+    update_nextion(selected_lamp);
 }
 
 
@@ -622,8 +618,6 @@ void update_nextion(int lamp_id){    // called if lamp was changed by lamp butto
   myNex.writeNum("butOnOff.val", state_on[lamp_id]);
   myNex.writeStr("lamp_name.txt", (String)info_name_char[lamp_id] );
 
-  // calculate and save current solid color
-  color[lamp_id] = RGB2HSV( (float)state_col_R[lamp_id], (float)state_col_G[lamp_id], (float)state_col_B[lamp_id] );
 Serial.println(" udate_nextion color[lamp_id]: " + (String)color[lamp_id] );
   // palette handling
   int palid = search_palchar_id_array( lamp_id, info_palcount[lamp_id], state_seg_pal[lamp_id] );
@@ -654,7 +648,8 @@ Serial.println(" udate_nextion color[lamp_id]: " + (String)color[lamp_id] );
     myNex.writeNum("fx_go.pco", 54938);
     myNex.writeStr("pal_name.txt",  "(Color Wheel Mode)" );
     paletteORsolid[lamp_id] = 1;
-    rot_data[0] = color[lamp_id];            // start with last chosen color of this lamp
+    // calculate desired rot[0] start from last saved solid color
+    //rot_data[0] = RGB2HSV( (float)state_col_R[selected_lamp], (float)state_col_G[selected_lamp], (float)state_col_B[selected_lamp] );
   }
 
   myNex.writeNum(butbuf_save, 64512);          // 54938 = white/normal text, 64512 = orange text, 65504 = yellow text

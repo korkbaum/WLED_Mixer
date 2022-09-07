@@ -33,7 +33,7 @@ char pal_char[MAX_LAMPS][MAX_PAL][25] = {0};
 
 int fxchar_ids[MAX_LAMPS][MAX_FX] = {0};    // to retain the original fx ids after array was sorted
 int palchar_ids[MAX_LAMPS][MAX_PAL] = {0};    // to retain the original pal ids after array was sorted
-int color[MAX_LAMPS] = {0};                   // consolidates the 3 RGB values into one hue value
+unsigned int color[MAX_LAMPS] = {0};                   // consolidates the 3 RGB values into one hue value 0-65535
 
 //********************************************************************
 

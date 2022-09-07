@@ -20,7 +20,10 @@ Inside view:
 This is what it looked like before (the 422 model) (from https://www.hifi-archiv.info/Grundig/1966-1/grundig29.jpg):
 ![grundig29](https://user-images.githubusercontent.com/16290782/188831966-dc0bdb3e-7b76-41f7-9854-e24520ee03bc.jpg)
 
-The lights you see in the demo video (will be added shortly) are also built by myself, more details can be found at https://mooodlights.com (in German).
+And finally, here is a link to the vintage Grundig mixer in action:
+https://mooodlights.com/wp-content/uploads/2022/09/WLED-Mixer.mp4
+
+The lights you see in the video are also built by myself, more details can be found at https://mooodlights.com (in German).
 
 To control any WLED lights with the mixer it is required to copy the http://[WLED-IP-Address]/json contents to files called wledjson0, wledjson1 etc. where the number in the end determines the association to the mixer channels 1-4. The files are uploaded with a very simple upload page the mixer provides. The IP of that upload page is shown in the startup screen. 
 
